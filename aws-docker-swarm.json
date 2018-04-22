@@ -840,7 +840,7 @@
                 "sudo chmod 777 /mnt/efs/token\n",
                 "sudo docker swarm init\n",
                 "sudo docker swarm join-token worker | grep docker > /mnt/efs/token\n",
-                "wget https://raw.githubusercontent.com/hvballuru/SpringBootWebApp/master/docker-cloud.yml >> /home/ec2-user/docker-cloud.yml\n",
+		"sudo curl https://raw.githubusercontent.com/hvballuru/SpringBootWebApp/master/docker-cloud.yml > /home/ec2-user/docker-cloud.yml\n",
                 "sudo /opt/aws/bin/cfn-signal -e $? ",
                 "         --stack ",
                 {
@@ -1141,8 +1141,10 @@
     "ALBTargetGroup": {
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
       "Properties": {
-        "HealthCheckIntervalSeconds": 60,
-        "UnhealthyThresholdCount": 10,
+        "HealthCheckIntervalSeconds": 6,
+	"HealthCheckTimeoutSeconds": 4,
+        "HealthyThresholdCount": 2,
+        "UnhealthyThresholdCount": 4,
         "HealthCheckPath": "/",
         "Name": {
           "Fn::Join": [
