@@ -1,0 +1,1209 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Template to build a docker Swarm cluster within AWS",
+  "Parameters": {
+    "CIDRRange": {
+      "Description": "VPCCIDR Range (will be a /16 block)",
+      "Type": "String",
+      "Default": "10.0.0.0",
+      "AllowedValues": [
+        "10.0.0.0",
+        "10.250.0.0"
+      ]
+    },
+    "KeyName": {
+      "Type": "String",
+      "Description": "Name of an existing EC2 KeyPair to enable SSH access"
+    }
+  },
+  "Mappings": {
+    "VPCRanges": {
+      "10.0.0.0": {
+        "PublicSubnetAZ1": "10.0.1.0/24",
+        "PublicSubnetAZ2": "10.0.2.0/24",
+        "PrivateSubnetAZ1": "10.0.3.0/24"
+      },
+      "10.250.0.0": {
+        "PublicSubnetAZ1": "10.250.1.0/24",
+        "PublicSubnetAZ2": "10.250.2.0/24",
+        "PrivateSubnetAZ1": "10.250.3.0/24"
+      }
+    }
+  },
+  "Resources": {
+    "VPCBase": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Join": [
+            "",
+            [
+              {
+                "Ref": "CIDRRange"
+              },
+              "/16"
+            ]
+          ]
+        },
+        "InstanceTenancy": "default",
+        "EnableDnsSupport": "true",
+        "EnableDnsHostnames": "true",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "-VPC"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "PublicNetAZ1": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::Select": [
+            "0",
+            {
+              "Fn::GetAZs": {
+                "Ref": "AWS::Region"
+              }
+            }
+          ]
+        },
+        "CidrBlock": {
+          "Fn::FindInMap": [
+            "VPCRanges",
+            {
+              "Ref": "CIDRRange"
+            },
+            "PublicSubnetAZ1"
+          ]
+        },
+        "MapPublicIpOnLaunch": "True",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "-PublicAZ1"
+                ]
+              ]
+            }
+          }
+        ],
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    },
+    "PublicNetAZ2": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::Select": [
+            "1",
+            {
+              "Fn::GetAZs": {
+                "Ref": "AWS::Region"
+              }
+            }
+          ]
+        },
+        "CidrBlock": {
+          "Fn::FindInMap": [
+            "VPCRanges",
+            {
+              "Ref": "CIDRRange"
+            },
+            "PublicSubnetAZ2"
+          ]
+        },
+        "MapPublicIpOnLaunch": "True",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "-PublicAZ2"
+                ]
+              ]
+            }
+          }
+        ],
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    },
+    "PrivateNetAZ1": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "AvailabilityZone": {
+          "Fn::Select": [
+            "0",
+            {
+              "Fn::GetAZs": {
+                "Ref": "AWS::Region"
+              }
+            }
+          ]
+        },
+        "CidrBlock": {
+          "Fn::FindInMap": [
+            "VPCRanges",
+            {
+              "Ref": "CIDRRange"
+            },
+            "PrivateSubnetAZ1"
+          ]
+        },
+        "MapPublicIpOnLaunch": "False",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "-PrivateAZ1"
+                ]
+              ]
+            }
+          },
+          {
+            "Key": "Network",
+            "Value": "private"
+          }
+        ],
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    },
+    "IGWBase": {
+      "Type": "AWS::EC2::InternetGateway",
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "-IGW"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "VGAIGWBase": {
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+      "Properties": {
+        "InternetGatewayId": {
+          "Ref": "IGWBase"
+        },
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    },
+    "SubnetNetworkACL": {
+      "Type": "AWS::EC2::NetworkAcl",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    },
+    "RouteTablePublic": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VPCBase"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "-PublicRT"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "RouteTablePrivateAZ1": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VPCBase"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "-PrivateAZ1RT"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "RoutePublicDefault": {
+      "DependsOn": [
+        "VGAIGWBase"
+      ],
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "RouteTablePublic"
+        },
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": {
+          "Ref": "IGWBase"
+        }
+      }
+    },
+    "RouteAssociationPublicAZ1Default": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PublicNetAZ1"
+        },
+        "RouteTableId": {
+          "Ref": "RouteTablePublic"
+        }
+      }
+    },
+    "RouteAssociationPublicAZ2Default": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PublicNetAZ2"
+        },
+        "RouteTableId": {
+          "Ref": "RouteTablePublic"
+        }
+      }
+    },
+    "RouteAssociationPrivateAZ1Default": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "PrivateNetAZ1"
+        },
+        "RouteTableId": {
+          "Ref": "RouteTablePrivateAZ1"
+        }
+      }
+    },
+    "NATAZ1": {
+      "Type": "AWS::EC2::NatGateway",
+      "DependsOn": "VGAIGWBase",
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "EIPNATAZ1",
+            "AllocationId"
+          ]
+        },
+        "SubnetId": {
+          "Ref": "PublicNetAZ1"
+        }
+      }
+    },
+    "EIPNATAZ1": {
+      "Type": "AWS::EC2::EIP",
+      "Properties": {
+        "Domain": "vpc"
+      }
+    },
+    "NATAZ1Route": {
+      "Type": "AWS::EC2::Route",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "RouteTablePrivateAZ1"
+        },
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId": {
+          "Ref": "NATAZ1"
+        }
+      }
+    },
+    "FileSystem": {
+      "Type": "AWS::EFS::FileSystem",
+      "Properties": {
+        "FileSystemTags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "-filesystem"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "MountTarget1": {
+      "Type": "AWS::EFS::MountTarget",
+      "Properties": {
+        "FileSystemId": {
+          "Ref": "FileSystem"
+        },
+        "SubnetId": {
+          "Ref": "PrivateNetAZ1"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "MountTargetSecurityGroup"
+          }
+        ]
+      }
+    },
+    "MountTarget2": {
+      "Type": "AWS::EFS::MountTarget",
+      "Properties": {
+        "FileSystemId": {
+          "Ref": "FileSystem"
+        },
+        "SubnetId": {
+          "Ref": "PublicNetAZ2"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "MountTargetSecurityGroup"
+          }
+        ]
+      }
+    },
+    "MountTarget3": {
+      "Type": "AWS::EFS::MountTarget",
+      "Properties": {
+        "FileSystemId": {
+          "Ref": "FileSystem"
+        },
+        "SubnetId": {
+          "Ref": "PublicNetAZ1"
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "MountTargetSecurityGroup"
+          }
+        ]
+      }
+    },
+    "PrivateNetASG": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "DependsOn": "SwarmManagerPrivateASG",    
+      "Properties": {
+        "AvailabilityZones": {
+          "Fn::GetAZs": {
+            "Ref": "PrivateNetAZ1"
+          }
+        },
+        "Cooldown": "300",
+        "DesiredCapacity": "2",
+        "HealthCheckGracePeriod": "300",
+        "HealthCheckType": "EC2",
+        "MaxSize": "2",
+        "MinSize": "2",
+        "VPCZoneIdentifier": [
+          {
+            "Ref": "PrivateNetAZ1"
+          }
+        ],
+        "LaunchConfigurationName": {
+          "Ref": "PrivateNetAZ1LaunchConfig"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "swarm-private-nodes",
+            "PropagateAtLaunch": true
+          }
+        ],
+        "TerminationPolicies": [
+          "Default"
+        ]
+      }
+    },
+    "PublicNetASG": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "DependsOn": "SwarmManagerPrivateASG",
+      "Properties": {
+        "AvailabilityZones": {
+          "Fn::GetAZs": {
+            "Ref": "PublicNetAZ1"
+          },
+          "Fn::GetAZs": {
+            "Ref": "PublicNetAZ2"
+          }
+        },
+        "Cooldown": "300",
+        "DesiredCapacity": "2",
+        "HealthCheckGracePeriod": "300",
+        "HealthCheckType": "EC2",
+        "MaxSize": "2",
+        "MinSize": "2",
+        "VPCZoneIdentifier": [
+          {
+            "Ref": "PublicNetAZ1"
+          },
+          {
+            "Ref": "PublicNetAZ2"
+          }
+        ],
+        "LaunchConfigurationName": {
+          "Ref": "PublicNetLaunchConfig"
+        },
+        "TargetGroupARNs": [
+          {
+            "Ref": "ALBTargetGroup"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "Swarm public nodes",
+            "PropagateAtLaunch": true
+          }
+        ],
+        "TerminationPolicies": [
+          "Default"
+        ]
+      }
+    },
+    "SwarmManagerPrivateASG": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "DependsOn": "NATAZ1Route",
+      "Properties": {
+        "AvailabilityZones": {
+          "Fn::GetAZs": {
+            "Ref": "PrivateNetAZ1"
+          }
+        },
+        "Cooldown": "300",
+        "DesiredCapacity": "1",
+        "HealthCheckGracePeriod": "300",
+        "HealthCheckType": "EC2",
+        "MaxSize": "1",
+        "MinSize": "1",
+        "VPCZoneIdentifier": [
+          {
+            "Ref": "PrivateNetAZ1"
+          }
+        ],
+        "LaunchConfigurationName": {
+          "Ref": "SwarmManagerLaunchConfig"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "swarm-manager-private-node",
+            "PropagateAtLaunch": true
+          }
+        ],
+        "TerminationPolicies": [
+          "Default"
+        ]
+      }
+    },
+    "PublicNetLaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",     
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "configSets": {
+            "Install": [
+              "Install"
+            ]
+          },
+          "Install": {
+            "packages": {
+              "yum": {
+                "nfs-utils": [
+                  
+                ],
+                "python27": [
+                  
+                ]
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": "ami-d874e0a0",
+        "InstanceType": "t2.micro",
+        "KeyName": "MyEC2KeyPair",
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash\n",
+                "sudo yum update -y\n",
+                "sudo yum install docker -y\n",
+                "sudo service docker start\n",
+                "sudo usermod -a -G docker ec2-user\n",
+                "sudo /opt/aws/bin/cfn-init",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                " ",
+                "         --resource ContainerInstances ",
+                "         --configsets Install ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n",
+                "PATH=$PATH:/usr/local/bin\n",
+                "sudo yum update -y\n",
+                "EC2_AVAIL_ZONE=`curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`\n",
+                "EC2_REGION=",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n",
+                "sudo mkdir /mnt/efs\n",
+                "EFS_FILE_SYSTEM_ID=",
+                {
+                  "Ref": "FileSystem"
+                },
+                "\n",
+                "DIR_SRC=$EC2_AVAIL_ZONE.$EFS_FILE_SYSTEM_ID.efs.$EC2_REGION.amazonaws.com\n",
+                "DIR_TGT=/mnt/efs\n",
+                "touch /home/ec2-user/echo.res\n",
+                "echo $EFS_FILE_SYSTEM_ID >> /home/ec2-user/echo.res\n",
+                "echo $EC2_AVAIL_ZONE >> /home/ec2-user/echo.res\n",
+                "echo $EC2_REGION >> /home/ec2-user/echo.res\n",
+                "echo $DIR_SRC >> /home/ec2-user/echo.res\n",
+                "echo $DIR_TGT >> /home/ec2-user/echo.res\n",
+                "sudo mount -t nfs4 $DIR_SRC:/ $DIR_TGT >> /home/ec2-user/echo.res\n",
+                "sudo cp -p /etc/fstab /etc/fstab.back-$(date +%F)\n",
+                "echo -e \"$DIR_SRC:/ \t\t $DIR_TGT \t\t nfs \t\t defaults \t\t 0 \t\t 0\" | sudo tee -a /etc/fstab\n",
+                "sudo docker ps\n",
+                "sudo service docker stop\n",
+                "sudo service docker start\n",
+                "bash /mnt/efs/token\n",
+                "sudo /opt/aws/bin/cfn-signal -e $? ",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                "         --resource ECSAutoScalingGroup ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n"
+              ]
+            ]
+          }
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "PublicNetSG"
+          }
+        ]
+      }
+    },
+    "PrivateNetAZ1LaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "configSets": {
+            "Install": [
+              "Install"
+            ]
+          },
+          "Install": {
+            "packages": {
+              "yum": {
+                "nfs-utils": [
+                  
+                ],
+                "python27": [
+                  
+                ]
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": "ami-d874e0a0",
+        "InstanceType": "t2.micro",
+        "KeyName": "MyEC2KeyPair",
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash\n",
+                "sudo yum update -y\n",
+                "sudo yum install docker -y\n",
+                "sudo service docker start\n",
+                "sudo usermod -a -G docker ec2-user\n",
+                "sudo /opt/aws/bin/cfn-init",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                " ",
+                "         --resource ContainerInstances ",
+                "         --configsets Install ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n",
+                "PATH=$PATH:/usr/local/bin\n",
+                "sudo yum update -y\n",
+                "EC2_AVAIL_ZONE=`curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`\n",
+                "EC2_REGION=",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n",
+                "sudo mkdir /mnt/efs\n",
+                "EFS_FILE_SYSTEM_ID=",
+                {
+                  "Ref": "FileSystem"
+                },
+                "\n",
+                "DIR_SRC=$EC2_AVAIL_ZONE.$EFS_FILE_SYSTEM_ID.efs.$EC2_REGION.amazonaws.com\n",
+                "DIR_TGT=/mnt/efs\n",
+                "touch /home/ec2-user/echo.res\n",
+                "echo $EFS_FILE_SYSTEM_ID >> /home/ec2-user/echo.res\n",
+                "echo $EC2_AVAIL_ZONE >> /home/ec2-user/echo.res\n",
+                "echo $EC2_REGION >> /home/ec2-user/echo.res\n",
+                "echo $DIR_SRC >> /home/ec2-user/echo.res\n",
+                "echo $DIR_TGT >> /home/ec2-user/echo.res\n",
+                "sudo mount -t nfs4 $DIR_SRC:/ $DIR_TGT >> /home/ec2-user/echo.res\n",
+                "sudo cp -p /etc/fstab /etc/fstab.back-$(date +%F)\n",
+                "echo -e \"$DIR_SRC:/ \t\t $DIR_TGT \t\t nfs \t\t defaults \t\t 0 \t\t 0\" | sudo tee -a /etc/fstab\n",
+                "sudo docker ps\n",
+                "sudo service docker stop\n",
+                "sudo service docker start\n",
+                "bash /mnt/efs/token\n",
+                "sudo /opt/aws/bin/cfn-signal -e $? ",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                "         --resource ECSAutoScalingGroup ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n"
+              ]
+            ]
+          }
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "PrivateNetAZ1SG"
+          }
+        ]
+      }
+    },
+    "SwarmManagerLaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "configSets": {
+            "Install": [
+              "Install"
+            ]
+          },
+          "Install": {
+            "packages": {
+              "yum": {
+                "nfs-utils": [
+                  
+                ],
+                "python27": [
+                  
+                ]
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": "ami-d874e0a0",
+        "InstanceType": "t2.micro",
+        "KeyName": "MyEC2KeyPair",
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash\n",
+                "sudo yum update -y\n",
+                "sudo yum install docker -y\n",
+                "sudo service docker start\n",
+                "sudo usermod -a -G docker ec2-user\n",
+                "sudo /opt/aws/bin/cfn-init",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                " ",
+                "         --resource ContainerInstances ",
+                "         --configsets Install ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n",
+                "PATH=$PATH:/usr/local/bin\n",
+                "sudo yum update -y\n",
+                "EC2_AVAIL_ZONE=`curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`\n",
+                "EC2_REGION=",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n",
+                "sudo mkdir /mnt/efs\n",
+                "EFS_FILE_SYSTEM_ID=",
+                {
+                  "Ref": "FileSystem"
+                },
+                "\n",
+                "DIR_SRC=$EC2_AVAIL_ZONE.$EFS_FILE_SYSTEM_ID.efs.$EC2_REGION.amazonaws.com\n",
+                "DIR_TGT=/mnt/efs\n",
+                "touch /home/ec2-user/echo.res\n",
+                "echo $EFS_FILE_SYSTEM_ID >> /home/ec2-user/echo.res\n",
+                "echo $EC2_AVAIL_ZONE >> /home/ec2-user/echo.res\n",
+                "echo $EC2_REGION >> /home/ec2-user/echo.res\n",
+                "echo $DIR_SRC >> /home/ec2-user/echo.res\n",
+                "echo $DIR_TGT >> /home/ec2-user/echo.res\n",
+                "sudo mount -t nfs4 $DIR_SRC:/ $DIR_TGT >> /home/ec2-user/echo.res\n",
+                "sudo cp -p /etc/fstab /etc/fstab.back-$(date +%F)\n",
+                "echo -e \"$DIR_SRC:/ \t\t $DIR_TGT \t\t nfs \t\t defaults \t\t 0 \t\t 0\" | sudo tee -a /etc/fstab\n",
+                "sudo docker ps\n",
+                "sudo service docker stop\n",
+                "sudo service docker start\n",
+                "sudo touch /mnt/efs/token\n",
+                "sudo chmod 777 /mnt/efs/token\n",
+                "sudo docker swarm init\n",
+                "sudo docker swarm join-token worker | grep docker > /mnt/efs/token\n",
+                "sudo /opt/aws/bin/cfn-signal -e $? ",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                "         --resource ECSAutoScalingGroup ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n"
+              ]
+            ]
+          }
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "PrivateNetAZ1SG"
+          }
+        ]
+      }
+    },
+    "PrivateNetAZ1SG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "swarm-private-nodes-sg",
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    },
+    "ALBSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "load-balancer-wizard-1 created on 2018-04-20T16:51:51.678-07:00",
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    },
+    "PublicNetSG": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "swarm-public-nodes-sg",
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    },
+    "MountTargetSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VPCBase"
+        },
+        "GroupDescription": "Security group for mount target",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "2049",
+            "ToPort": "2049",
+            "CidrIp": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Ref": "CIDRRange"
+                  },
+                  "/16"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Networkacl1": {
+      "Type": "AWS::EC2::NetworkAclEntry",
+      "Properties": {
+        "CidrBlock": "0.0.0.0/0",
+        "Egress": "true",
+        "Protocol": "-1",
+        "RuleAction": "allow",
+        "RuleNumber": "100",
+        "NetworkAclId": {
+          "Ref": "SubnetNetworkACL"
+        }
+      }
+    },
+    "Networkacl2": {
+      "Type": "AWS::EC2::NetworkAclEntry",
+      "Properties": {
+        "CidrBlock": "0.0.0.0/0",
+        "Protocol": "-1",
+        "RuleAction": "allow",
+        "RuleNumber": "100",
+        "NetworkAclId": {
+          "Ref": "SubnetNetworkACL"
+        }
+      }
+    },
+    "Subnetacl1": {
+      "Type": "AWS::EC2::SubnetNetworkAclAssociation",
+      "Properties": {
+        "NetworkAclId": {
+          "Ref": "SubnetNetworkACL"
+        },
+        "SubnetId": {
+          "Ref": "PrivateNetAZ1"
+        }
+      }
+    },
+    "Subnetacl2": {
+      "Type": "AWS::EC2::SubnetNetworkAclAssociation",
+      "Properties": {
+        "NetworkAclId": {
+          "Ref": "SubnetNetworkACL"
+        },
+        "SubnetId": {
+          "Ref": "PublicNetAZ2"
+        }
+      }
+    },
+    "Subnetacl3": {
+      "Type": "AWS::EC2::SubnetNetworkAclAssociation",
+      "Properties": {
+        "NetworkAclId": {
+          "Ref": "SubnetNetworkACL"
+        },
+        "SubnetId": {
+          "Ref": "PublicNetAZ1"
+        }
+      }
+    },
+    "SGingress1": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PrivateNetAZ1SG"
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Ref": "PrivateNetAZ1SG"
+        }
+      }
+    },
+    "SGingress2": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PrivateNetAZ1SG"
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Ref": "PublicNetSG"
+        }
+      }
+    },
+    "SGingress3": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PrivateNetAZ1SG"
+        },
+        "IpProtocol": "tcp",
+        "FromPort": "22",
+        "ToPort": "22",
+        "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "SGingress4": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "ALBSG"
+        },
+        "IpProtocol": "tcp",
+        "FromPort": "80",
+        "ToPort": "80",
+        "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "SGingress5": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PublicNetSG"
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Ref": "PrivateNetAZ1SG"
+        }
+      }
+    },
+    "SGingress6": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PublicNetSG"
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Ref": "ALBSG"
+        }
+      }
+    },
+    "SGingress7": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PublicNetSG"
+        },
+        "IpProtocol": "-1",
+        "SourceSecurityGroupId": {
+          "Ref": "PublicNetSG"
+        }
+      }
+    },
+    "SGingress8": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PublicNetSG"
+        },
+        "IpProtocol": "tcp",
+        "FromPort": "22",
+        "ToPort": "22",
+        "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "SGegress1": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PrivateNetAZ1SG"
+        },
+        "IpProtocol": "-1",
+        "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "SGegress2": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "ALBSG"
+        },
+        "IpProtocol": "-1",
+        "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "SGegress3": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "PublicNetSG"
+        },
+        "IpProtocol": "-1",
+        "CidrIp": "0.0.0.0/0"
+      }
+    },
+    "ALBListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": {
+              "Ref": "ALBTargetGroup"
+            }
+          }
+        ],
+        "LoadBalancerArn": {
+          "Ref": "ApplicationLoadBalancer"
+        },
+        "Port": "80",
+        "Protocol": "HTTP"
+      }
+    },
+    "ApplicationLoadBalancer": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "Scheme": "internet-facing",
+        "Subnets": [
+          {
+            "Ref": "PublicNetAZ1"
+          },
+          {
+            "Ref": "PublicNetAZ2"
+          }
+        ],
+        "SecurityGroups": [
+          {
+            "Ref": "ALBSG"
+          }
+        ]
+      }
+    },
+    "ALBTargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "HealthCheckIntervalSeconds": 60,
+        "UnhealthyThresholdCount": 10,
+        "HealthCheckPath": "/",
+        "Name": {
+          "Fn::Join": [
+            "",
+            [
+              {
+                "Ref": "AWS::StackName"
+              },
+              "-TargetGrp"
+            ]
+          ]
+        },
+        "Port": 5000,
+        "Protocol": "HTTP",
+        "VpcId": {
+          "Ref": "VPCBase"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "VpcId": {
+      "Value": {
+        "Ref": "VPCBase"
+      }
+    },
+    "ElasticIP1": {
+      "Value": {
+        "Ref": "EIPNATAZ1"
+      }
+    },
+    "SubnetPublicAZ1": {
+      "Value": {
+        "Ref": "PublicNetAZ1"
+      }
+    },
+    "SubnetPublicAZ2": {
+      "Value": {
+        "Ref": "PublicNetAZ2"
+      }
+    },
+    "SubnetPrivateAZ1": {
+      "Value": {
+        "Ref": "PrivateNetAZ1"
+      }
+    },
+    "DefaultSG": {
+      "Value": {
+        "Fn::GetAtt": [
+          "VPCBase",
+          "DefaultSecurityGroup"
+        ]
+      }
+    },
+    "DemoURL": {
+      "Description": "URL for accessing the application",
+      "Value": {
+        "Fn::GetAtt": [
+          "ApplicationLoadBalancer",
+          "DNSName"
+        ]
+      }
+    }
+  }
+}

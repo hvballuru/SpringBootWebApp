@@ -1,0 +1,58 @@
+version: '3.2'
+services:
+ mysql:
+   image: mysql:5.6
+   environment:
+      MYSQL_ROOT_PASSWORD: 3ypt1c3
+      MYSQL_DATABASE: demodb
+      MYSQL_USER: demo_user
+      MYSQL_PASSWORD: welcome1
+   ports:
+    - "3306:3306"
+   deploy:
+    placement:
+        constraints: [node.labels.isPublicNode != true]
+    mode: replicated
+    replicas: 1
+
+ tomcat:
+   image: hvballuru/demospringapp:latest
+   ports:
+    - "8080:8080"
+   links:
+    - mysql
+    - etcd
+   deploy:
+    placement:
+        constraints: [node.labels.isPublicNode != true]
+    mode: replicated
+    replicas: 2
+   depends_on:
+     - mysql
+     - etcd
+ etcd:
+   image: elcolio/etcd
+   ports:
+    - "2379:2379"
+    - "2380:2380"
+    - "4001:4001"
+    - "7001:7001"
+   deploy:
+    placement:
+        constraints: [node.labels.isPublicNode != true]
+    mode: replicated
+    replicas: 1
+ nginx:
+   image: hvballuru/nginx
+   command: nginx -g "daemon off;"
+   links:
+     - tomcat
+   ports:
+    - "5000:80"
+   depends_on:
+     - tomcat
+   deploy:
+    placement:
+        constraints: [node.labels.isPublicNode == true]
+    mode: replicated
+    replicas: 2
