@@ -14,7 +14,7 @@ services:
     replicas: 1
 
  tomcat:
-   image: demospringapp:latest
+   image: hvballuru/demospringapp
    ports:
     - "8080:8080"
    links:
